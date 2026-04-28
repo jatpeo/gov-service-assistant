@@ -83,7 +83,7 @@ const router = createRouter({
 
 router.beforeEach((to, from, next) => {
   if (to.meta.title) {
-    document.title = to.meta.title + ' - 国资客服智能助手'
+    document.title = to.meta.title + ' - 智能客服助手'
   }
 
   if (to.matched.some(record => record.meta.requiresAuth) && !isAuthenticated()) {

@@ -1,6 +1,7 @@
 .idea/
 .vscode/
 backend/target/
+backend-springaialibaba/target/
 target/
 data/
 frontend/node_modules/

@@ -1,7 +1,7 @@
 {
   "name": "gov-service-assistant-frontend",
   "version": "1.0.0",
-  "description": "国资客服智能助手 - 前端项目",
+  "description": "智能客服助手 - 前端项目",
   "type": "module",
   "scripts": {
     "dev": "vite",

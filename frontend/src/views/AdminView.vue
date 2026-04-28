@@ -6,7 +6,7 @@
           <el-icon size="32" color="#fff"><Service /></el-icon>
         </div>
         <div class="brand">
-          <h2>国资客服系统</h2>
+          <h2>智能客服系统</h2>
           <span>管理后台</span>
         </div>
       </div>
@@ -86,9 +86,8 @@
           返回客服页面
         </el-button>
         <div class="support-info">
-          <div>技术服务1：15869004286</div>
-          <div>技术服务2：15737527206</div>
-          <div>系统版本号：v1.20.0</div>
+          <div>技术服务1：123456789</div>
+          <div>系统版本号：v1.0.0</div>
         </div>
       </div>
     </aside>

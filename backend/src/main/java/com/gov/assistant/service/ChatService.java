@@ -284,7 +284,7 @@ public class ChatService {
             prompt.append(systemPrompt).append("\n\n");
         } catch (IOException e) {
             log.warn("无法加载系统提示文件，使用默认提示");
-            prompt.append("你是国有资本监管平台的智能客服助手，专业、严谨、高效地回答用户问题。").append("\n\n");
+            prompt.append("你是智能客服助手，专业、严谨、高效地回答用户问题。").append("\n\n");
         }
 
         // 意图信息
@@ -318,7 +318,7 @@ public class ChatService {
             prompt.append(systemPrompt).append("\n\n");
         } catch (IOException e) {
             log.warn("无法加载系统提示文件，使用默认提示");
-            prompt.append("你是国有资本监管平台的智能客服助手，专业、严谨、高效地回答用户问题。").append("\n\n");
+            prompt.append("你是智能客服助手，专业、严谨、高效地回答用户问题。").append("\n\n");
         }
 
         prompt.append("【用户意图】").append(intentResult.intentType()).append("\n");

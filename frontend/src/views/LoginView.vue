@@ -5,7 +5,7 @@
         <div class="brand-mark">
           <el-icon><Service /></el-icon>
         </div>
-        <h1>国资客服系统</h1>
+        <h1>智能客服系统</h1>
         <p>登录后可进入管理后台，处理会话、维护知识库并查看服务统计。</p>
         <div class="capabilities">
           <span>会话管理</span>

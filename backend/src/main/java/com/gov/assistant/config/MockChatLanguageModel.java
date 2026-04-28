@@ -44,10 +44,10 @@ public class MockChatLanguageModel implements ChatLanguageModel {
         String lowerMsg = userMessage.toLowerCase();
 
         if (lowerMsg.contains("政策") || lowerMsg.contains("法规")) {
-            return "根据最新的国有资本监管政策，国有企业需要严格遵守《企业国有资产法》相关规定。具体政策文件可在国资委官网查询。";
+            return "根据最新政策，国有企业需要严格遵守《企业国有资产法》相关规定。具体政策文件可在官网查询。";
         }
         if (lowerMsg.contains("办理") || lowerMsg.contains("申请")) {
-            return "业务办理流程如下：\n1. 登录国资监管平台\n2. 进入对应业务模块\n3. 填写申请表单\n4. 上传相关材料\n5. 提交审核\n\n如有疑问，可拨打客服热线 400-xxx-xxxx。";
+            return "业务办理流程如下：\n1. 登录平台\n2. 进入对应业务模块\n3. 填写申请表单\n4. 上传相关材料\n5. 提交审核\n\n如有疑问，可拨打客服热线 400-xxx-xxxx。";
         }
         if (lowerMsg.contains("进度") || lowerMsg.contains("查询")) {
             return "您可以通过以下方式查询办理进度：\n1. 登录平台查看[我的业务]\n2. 使用业务编号在查询页面检索\n3. 联系专属客服经理\n\n一般业务审核周期为 5-15 个工作日。";
@@ -59,6 +59,6 @@ public class MockChatLanguageModel implements ChatLanguageModel {
             return "感谢您的反馈！我们非常重视您的意见。\n\n投诉建议渠道：\n1. 在线提交工单\n2. 拨打投诉热线 400-xxx-xxxx\n3. 发送邮件至 feedback@gov-assistant.com\n\n我们会在 3 个工作日内给予回复。";
         }
 
-        return "您好！我已收到您的问题。作为国资客服智能助手，我可以为您解答政策咨询、业务办理、进度查询、技术支持等相关问题。\n\n请问有什么具体可以帮助您的吗？";
+        return "您好！我已收到您的问题。作为客服智能助手，我可以为您解答政策咨询、业务办理、进度查询、技术支持等相关问题。\n\n请问有什么具体可以帮助您的吗？";
     }
 }

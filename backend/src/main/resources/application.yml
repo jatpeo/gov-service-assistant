@@ -41,7 +41,7 @@ langchain4j:
     model-name: qwen-plus
     base-url: https://dashscope.aliyuncs.com/compatible-mode/v1
 
-# 国资监管业务配置
+# 业务配置
 gov:
   assistant:
     # 人工转接阈值

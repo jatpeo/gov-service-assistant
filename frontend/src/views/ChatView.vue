@@ -12,8 +12,8 @@
           <el-icon size="28" color="#fff"><Service /></el-icon>
         </div>
         <div class="brand">
-          <h1>国资客服智能助手</h1>
-          <span class="subtitle">国有资本监管平台</span>
+          <h1>智能客服助手</h1>
+          <span class="subtitle">xxxxxx平台</span>
         </div>
       </div>
       <div class="header-right">
@@ -129,7 +129,7 @@
             <div class="welcome-icon">
               <el-icon size="64" color="#b72a33"><ChatDotRound /></el-icon>
             </div>
-            <h2 class="welcome-title">您好，我是国资客服智能助手</h2>
+            <h2 class="welcome-title">您好，我是智能客服助手</h2>
             <p class="welcome-desc">
               我可以为您解答关于国有资本监管的政策法规、业务办理、系统使用等问题
             </p>
@@ -573,7 +573,7 @@ function getSystemActions(msg) {
 
   if (isScopeGuideMessage(msg)) {
     return [
-      { key: 'policy', label: '咨询政策', type: 'primary', action: 'send', text: '我想了解国资监管政策', icon: Document },
+      { key: 'policy', label: '咨询政策', type: 'primary', action: 'send', text: '我想了解相关监管政策', icon: Document },
       { key: 'business', label: '办理业务', type: 'success', action: 'send', text: '如何办理国有资本产权登记？', icon: OfficeBuilding },
       { key: 'handoff', label: '转人工', type: 'warning', action: 'handoff', icon: Service }
     ]
@@ -591,7 +591,7 @@ function getSystemActions(msg) {
 function isScopeGuideMessage(msg) {
   return msg?.senderType === 'SYSTEM'
     && typeof msg.content === 'string'
-    && msg.content.includes('我主要协助处理国有资本监管平台相关事项')
+    && msg.content.includes('我主要协助处理平台相关事项')
 }
 
 function handleSystemAction(action) {
