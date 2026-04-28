@@ -230,7 +230,7 @@ onUnmounted(() => {
 .stat-value {
   font-size: 32px;
   font-weight: bold;
-  color: #409EFF;
+  color: #b72a33;
   margin-bottom: 8px;
 }
 

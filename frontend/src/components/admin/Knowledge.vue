@@ -313,7 +313,6 @@ import {
   addKnowledgeItem,
   deleteKnowledgeItem,
   getDocumentKnowledgeChunkImageUrl,
-  getDocumentKnowledgeChunks,
   getDocumentKnowledgeList,
   getDocumentKnowledgePreview,
   publishDocumentKnowledge,

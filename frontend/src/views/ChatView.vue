@@ -1,10 +1,15 @@
 <template>
-  <div class="chat-view">
+  <div class="chat-view" :class="{ 'compact-mode': isWidgetMode }" :style="widgetStyle">
     <!-- 头部 -->
     <header class="chat-header">
-      <div class="header-left">
+      <div
+        class="header-left"
+        :class="{ 'widget-drag-handle': isWidgetMode }"
+        :title="isWidgetMode ? '拖动移动窗口' : ''"
+        @pointerdown="startWidgetDrag"
+      >
         <div class="logo">
-          <el-icon size="28" color="#1a5fb4"><Service /></el-icon>
+          <el-icon size="28" color="#fff"><Service /></el-icon>
         </div>
         <div class="brand">
           <h1>国资客服智能助手</h1>
@@ -12,51 +17,117 @@
         </div>
       </div>
       <div class="header-right">
-        <el-button type="primary" text @click="goToAdmin">
+        <el-button v-if="canAccessAdmin && !isWidgetMode" type="primary" text @click="goToAdmin">
           <el-icon><Setting /></el-icon>
           管理后台
         </el-button>
+        <el-tag v-if="!isWidgetMode" size="small" :type="getSocketStatusTagType()" effect="plain" class="socket-status-tag">
+          实时连接 · {{ getSocketStatusLabel() }}
+        </el-tag>
+        <el-button class="mode-toggle-btn" text @click="toggleWidgetMode">
+          <el-icon>
+            <component :is="isWidgetMode ? Expand : Fold" />
+          </el-icon>
+          {{ isWidgetMode ? '展开页面' : '收起为窗口' }}
+        </el-button>
+        <el-dropdown @command="handleUserCommand">
+          <span class="chat-user">
+            <el-avatar :size="30" :icon="UserFilled" />
+            <span>{{ currentUser?.displayName || '用户' }}</span>
+            <el-icon><ArrowDown /></el-icon>
+          </span>
+          <template #dropdown>
+            <el-dropdown-menu>
+              <el-dropdown-item disabled>{{ currentUser?.username || '未登录' }}</el-dropdown-item>
+              <el-dropdown-item command="logout" divided>退出登录</el-dropdown-item>
+            </el-dropdown-menu>
+          </template>
+        </el-dropdown>
       </div>
+      <button
+        v-if="isWidgetMode"
+        class="widget-resize-handle"
+        type="button"
+        aria-label="调整窗口大小"
+        title="拖动可调整窗口大小"
+        @pointerdown="startWidgetResize"
+      >
+        <span></span>
+      </button>
     </header>
 
     <!-- 主体内容 -->
     <main class="chat-main">
-      <!-- 左侧快捷入口 -->
-      <aside class="quick-actions">
-        <div class="section-title">快捷服务</div>
-        <div class="action-buttons">
-          <el-button
-            v-for="action in quickActions"
-            :key="action.key"
-            class="action-btn"
-            @click="quickSend(action.text)"
-          >
-            <el-icon :size="18"><component :is="action.icon" /></el-icon>
-            <span>{{ action.label }}</span>
-          </el-button>
-        </div>
-
-        <div class="section-title" style="margin-top: 24px;">常见问题</div>
-        <div class="faq-list">
-          <div
-            v-for="faq in frequentQuestions"
-            :key="faq.id"
-            class="faq-item"
-            @click="quickSend(faq.question)"
-          >
-            <el-icon><QuestionFilled /></el-icon>
-            <span>{{ faq.question }}</span>
+      <!-- 左侧会话工作台 -->
+      <aside v-if="!isWidgetMode" class="chat-sidebar">
+        <div class="sidebar-user">
+          <el-avatar :size="42" :icon="UserFilled" />
+          <div>
+            <strong>{{ currentUser?.displayName || '用户' }}</strong>
+            <span>{{ getRoleLabel(currentUser?.role) }}</span>
           </div>
         </div>
+
+        <el-button class="new-chat-btn" type="primary" @click="startNewConversation">
+          <el-icon><Plus /></el-icon>
+          新建会话
+        </el-button>
+
+        <div class="section-title">我的会话</div>
+        <div class="conversation-list">
+          <div
+            v-for="conversation in conversationHistory"
+            :key="conversation.sessionId"
+            class="conversation-item"
+            :class="{ active: conversation.sessionId === sessionId }"
+            role="button"
+            tabindex="0"
+            @click="selectConversation(conversation.sessionId)"
+            @keydown.enter="selectConversation(conversation.sessionId)"
+          >
+            <span class="conversation-title">{{ conversation.title }}</span>
+            <span class="conversation-meta">
+              {{ getConversationStatusLabel(conversation.status) }} · {{ formatDate(conversation.updatedAt || conversation.createdAt) }}
+            </span>
+            <button
+              v-if="conversation.sessionId === sessionId"
+              class="clear-conversation"
+              type="button"
+              aria-label="删除当前会话"
+              @click.stop="deleteSelectedConversation(conversation.sessionId)"
+            >
+              <el-icon><Close /></el-icon>
+            </button>
+          </div>
+          <div v-if="!conversationHistory.length" class="empty-history">
+            暂无历史会话
+          </div>
+        </div>
+
       </aside>
 
       <!-- 聊天区域 -->
       <section class="chat-area">
+        <div class="quick-service-bar">
+          <div class="quick-service-title">快捷服务</div>
+          <div class="quick-service-actions">
+            <button
+              v-for="action in quickActions"
+              :key="action.id || action.serviceKey"
+              class="quick-service-item"
+              @click="applyQuickService(action)"
+            >
+              <el-icon><component :is="getQuickServiceIcon(action.iconKey)" /></el-icon>
+              <span>{{ action.label }}</span>
+            </button>
+          </div>
+        </div>
+
         <!-- 欢迎界面 -->
         <div v-if="messages.length === 0" class="welcome-panel">
           <div class="welcome-content">
             <div class="welcome-icon">
-              <el-icon size="64" color="#1a5fb4"><ChatDotRound /></el-icon>
+              <el-icon size="64" color="#b72a33"><ChatDotRound /></el-icon>
             </div>
             <h2 class="welcome-title">您好，我是国资客服智能助手</h2>
             <p class="welcome-desc">
@@ -101,7 +172,11 @@
                 <span class="sender-name">{{ getSenderName(msg.senderType) }}</span>
                 <span class="message-time">{{ formatTime(msg.createdAt) }}</span>
               </div>
-              <div class="message-body" :class="{ 'system-body': msg.senderType === 'SYSTEM' }" v-html="renderMarkdown(msg.content)"></div>
+              <div
+                class="message-body"
+                :class="{ 'scope-guide-body': isScopeGuideMessage(msg) }"
+                v-html="renderMarkdown(msg.content)"
+              ></div>
               <div v-if="getMessageImageChunks(msg).length" class="source-images">
                 <div class="source-images-title">来源图片</div>
                 <div class="source-images-grid">
@@ -123,6 +198,7 @@
                   plain
                   @click="handleSystemAction(action)"
                 >
+                  <el-icon v-if="action.icon"><component :is="action.icon" /></el-icon>
                   {{ action.label }}
                 </el-button>
               </div>
@@ -135,9 +211,9 @@
           </div>
 
           <!-- 加载状态 -->
-          <div v-if="isLoading" class="message-item ai-message">
+          <div v-if="isLoading && !hasStreamingMessage()" class="message-item ai-message">
             <div class="message-avatar">
-              <el-avatar :size="40" :icon="Service" style="background: #1a5fb4" />
+              <el-avatar :size="40" :icon="Service" style="background: #b72a33" />
             </div>
             <div class="message-content">
               <div class="typing-indicator">
@@ -156,7 +232,7 @@
               ref="chatInputRef"
               v-model="inputMessage"
               type="textarea"
-              :rows="2"
+              :rows="3"
               placeholder="请输入您的问题..."
               resize="none"
               @keydown.enter.prevent="sendMessage"
@@ -211,22 +287,25 @@
       </template>
     </el-dialog>
   </div>
-</template>
+  </template>
 
 <script setup>
-import { ref, onMounted, nextTick, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import { useRouter } from 'vue-router'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { marked } from 'marked'
 import hljs from 'highlight.js'
 import 'highlight.js/styles/github.css'
 import {
   Service, Setting, UserFilled, ChatDotRound,
-  Promotion, CircleCheck, InfoFilled, QuestionFilled,
-  Document, OfficeBuilding, Search, Tools, User, MessageBox
+  Promotion, CircleCheck, InfoFilled,
+  Document, OfficeBuilding, Search, Tools, User, MessageBox,
+  ArrowDown, Plus, Close, Fold, Expand
 } from '@element-plus/icons-vue'
 import {
-  createConversation, sendMessage as sendMessageApi, getConversationHistory,
-  closeConversation, getFrequentQuestions
+  createConversation, deleteConversation, streamMessage as streamMessageApi, getConversationHistory,
+  closeConversation, clearAuth, getEnabledQuickServices, getMyConversations, getStoredUser, hasAnyRole,
+  createConversationSocket
 } from '@/api/chat.js'
 
 const router = useRouter()
@@ -249,24 +328,30 @@ const inputMessage = ref('')
 const isLoading = ref(false)
 const messageListRef = ref(null)
 const chatInputRef = ref(null)
-const frequentQuestions = ref([])
+const conversationHistory = ref([])
+const currentUser = ref(getStoredUser())
 const ratingDialogVisible = ref(false)
 const rating = ref(5)
 const ratingComment = ref('')
+const socketStatus = ref('disconnected')
+const isWidgetMode = ref(localStorage.getItem('gov_assistant_chat_widget_mode') === 'compact')
+const widgetRect = ref(loadWidgetRect())
 
-// 轮询定时器
-let messagePollTimer = null
-let lastMessageCount = 0
+let conversationSocket = null
+let conversationReconnectTimer = null
+let conversationReconnectAttempts = 0
+let shouldReconnectConversation = false
+let widgetDragState = null
+let widgetResizeState = null
 
-// 快捷操作
-const quickActions = [
-  { key: 'policy', label: '政策咨询', icon: Document, text: '我想了解最新的国资监管政策' },
-  { key: 'business', label: '业务办理', icon: OfficeBuilding, text: '如何办理国有资本产权登记？' },
-  { key: 'query', label: '进度查询', icon: Search, text: '查询我的业务办理进度' },
-  { key: 'support', label: '技术支持', icon: Tools, text: '系统登录遇到问题怎么办？' },
-  { key: 'account', label: '账号权限', icon: User, text: '申请账号权限开通' },
-  { key: 'feedback', label: '投诉建议', icon: MessageBox, text: '我有投诉建议要反馈' }
-]
+const WIDGET_LAYOUT_KEY = 'gov_assistant_chat_widget_layout'
+const WIDGET_MIN_WIDTH = 320
+const WIDGET_MIN_HEIGHT = 420
+const WIDGET_MAX_WIDTH = 640
+const WIDGET_MAX_HEIGHT = 860
+
+const quickActions = ref([])
+const quickServiceIconMap = { Document, OfficeBuilding, Search, Tools, User, MessageBox }
 
 // 意图类型
 const intentTypes = [
@@ -297,6 +382,161 @@ function formatTime(timeStr) {
   return date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
 }
 
+function formatDate(timeStr) {
+  if (!timeStr) return ''
+  const date = new Date(timeStr)
+  return date.toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit' })
+}
+
+function getRoleLabel(role) {
+  const labels = {
+    ADMIN: '系统管理员',
+    AGENT: '人工客服',
+    VIEWER: '只读账号',
+    USER: '平台用户'
+  }
+  return labels[role] || '平台用户'
+}
+
+function getConversationStatusLabel(status) {
+  const labels = {
+    ACTIVE: '进行中',
+    HANDOFF: '人工接入',
+    CLOSED: '已结束',
+    TIMEOUT: '已超时'
+  }
+  return labels[status] || '会话'
+}
+
+const canAccessAdmin = hasAnyRole(['ADMIN', 'AGENT', 'VIEWER'])
+
+const widgetStyle = computed(() => {
+  if (!isWidgetMode.value) {
+    return {}
+  }
+
+  return {
+    '--widget-left': `${widgetRect.value.left}px`,
+    '--widget-top': `${widgetRect.value.top}px`,
+    '--widget-width': `${widgetRect.value.width}px`,
+    '--widget-height': `${widgetRect.value.height}px`
+  }
+})
+
+function loadWidgetRect() {
+  const fallback = getDefaultWidgetRect()
+  try {
+    const raw = localStorage.getItem(WIDGET_LAYOUT_KEY)
+    if (!raw) return fallback
+    const parsed = JSON.parse(raw)
+    return clampWidgetRect({
+      left: Number(parsed.left),
+      top: Number(parsed.top),
+      width: Number(parsed.width),
+      height: Number(parsed.height)
+    })
+  } catch (error) {
+    return fallback
+  }
+}
+
+function getDefaultWidgetRect() {
+  const width = 420
+  const height = 680
+  const viewportWidth = typeof window !== 'undefined' ? window.innerWidth : 1440
+  const viewportHeight = typeof window !== 'undefined' ? window.innerHeight : 900
+  return clampWidgetRect({
+    left: Math.max(16, viewportWidth - width - 16),
+    top: Math.max(16, viewportHeight - height - 16),
+    width,
+    height
+  })
+}
+
+function clampWidgetRect(rect) {
+  const viewportWidth = typeof window !== 'undefined' ? window.innerWidth : 1440
+  const viewportHeight = typeof window !== 'undefined' ? window.innerHeight : 900
+  const width = Math.min(Math.max(Number(rect.width) || 420, WIDGET_MIN_WIDTH), Math.min(WIDGET_MAX_WIDTH, viewportWidth - 16))
+  const height = Math.min(Math.max(Number(rect.height) || 680, WIDGET_MIN_HEIGHT), Math.min(WIDGET_MAX_HEIGHT, viewportHeight - 16))
+  const left = Math.min(Math.max(Number(rect.left) || viewportWidth - width - 16, 16), Math.max(16, viewportWidth - width - 16))
+  const top = Math.min(Math.max(Number(rect.top) || viewportHeight - height - 16, 16), Math.max(16, viewportHeight - height - 16))
+  return { left, top, width, height }
+}
+
+function persistWidgetRect() {
+  localStorage.setItem(WIDGET_LAYOUT_KEY, JSON.stringify(widgetRect.value))
+}
+
+function toggleWidgetMode() {
+  isWidgetMode.value = !isWidgetMode.value
+  localStorage.setItem('gov_assistant_chat_widget_mode', isWidgetMode.value ? 'compact' : 'full')
+  if (isWidgetMode.value) {
+    widgetRect.value = clampWidgetRect(widgetRect.value)
+    persistWidgetRect()
+  }
+  nextTick(() => {
+    scrollToBottom()
+    chatInputRef.value?.focus?.()
+  })
+}
+
+function startWidgetDrag(event) {
+  if (!isWidgetMode.value || event.button !== 0) return
+  event.preventDefault()
+  widgetDragState = {
+    startX: event.clientX,
+    startY: event.clientY,
+    startLeft: widgetRect.value.left,
+    startTop: widgetRect.value.top
+  }
+}
+
+function startWidgetResize(event) {
+  if (!isWidgetMode.value || event.button !== 0) return
+  event.preventDefault()
+  event.stopPropagation()
+  widgetResizeState = {
+    startX: event.clientX,
+    startY: event.clientY,
+    startWidth: widgetRect.value.width,
+    startHeight: widgetRect.value.height
+  }
+}
+
+function handleGlobalPointerMove(event) {
+  if (!isWidgetMode.value) return
+
+  if (widgetDragState) {
+    widgetRect.value = clampWidgetRect({
+      ...widgetRect.value,
+      left: widgetDragState.startLeft + (event.clientX - widgetDragState.startX),
+      top: widgetDragState.startTop + (event.clientY - widgetDragState.startY)
+    })
+  }
+
+  if (widgetResizeState) {
+    widgetRect.value = clampWidgetRect({
+      ...widgetRect.value,
+      width: widgetResizeState.startWidth + (event.clientX - widgetResizeState.startX),
+      height: widgetResizeState.startHeight + (event.clientY - widgetResizeState.startY)
+    })
+  }
+}
+
+function handleGlobalPointerUp() {
+  if (widgetDragState || widgetResizeState) {
+    widgetDragState = null
+    widgetResizeState = null
+    persistWidgetRect()
+  }
+}
+
+function handleWindowResize() {
+  if (!isWidgetMode.value) return
+  widgetRect.value = clampWidgetRect(widgetRect.value)
+  persistWidgetRect()
+}
+
 // 渲染 Markdown
 function renderMarkdown(content) {
   return marked(content)
@@ -318,6 +558,10 @@ function getMessageImageChunks(msg) {
   return parseChunkIds(msg.knowledgeSourceChunkIds)
 }
 
+function hasStreamingMessage() {
+  return messages.value.some(msg => String(msg.id || '').startsWith('stream-'))
+}
+
 function getChunkImageUrl(chunkId) {
   return `/api/chat/document-chunks/${chunkId}/image`
 }
@@ -327,14 +571,27 @@ function getSystemActions(msg) {
     return []
   }
 
-  if (msg.content.includes('您可以选择') || msg.content.includes('转人工客服')) {
+  if (isScopeGuideMessage(msg)) {
     return [
-      { key: 'change-topic', label: '换个话题', type: 'primary', action: 'change-topic' },
-      { key: 'handoff', label: '转人工客服', type: 'warning', action: 'handoff' }
+      { key: 'policy', label: '咨询政策', type: 'primary', action: 'send', text: '我想了解国资监管政策', icon: Document },
+      { key: 'business', label: '办理业务', type: 'success', action: 'send', text: '如何办理国有资本产权登记？', icon: OfficeBuilding },
+      { key: 'handoff', label: '转人工', type: 'warning', action: 'handoff', icon: Service }
+    ]
+  }
+
+  if (msg.content.includes('转人工客服')) {
+    return [
+      { key: 'handoff', label: '转人工', type: 'warning', action: 'handoff', icon: Service }
     ]
   }
 
   return []
+}
+
+function isScopeGuideMessage(msg) {
+  return msg?.senderType === 'SYSTEM'
+    && typeof msg.content === 'string'
+    && msg.content.includes('我主要协助处理国有资本监管平台相关事项')
 }
 
 function handleSystemAction(action) {
@@ -342,6 +599,11 @@ function handleSystemAction(action) {
 
   if (action.action === 'handoff') {
     quickSend('转人工')
+    return
+  }
+
+  if (action.action === 'send' && action.text) {
+    quickSend(action.text)
     return
   }
 
@@ -357,7 +619,7 @@ function getSenderName(senderType) {
     'USER': '您',
     'AI': '智能助手',
     'HUMAN': '人工客服',
-    'SYSTEM': '系统'
+    'SYSTEM': '智能助手'
   }
   return names[senderType] || '智能助手'
 }
@@ -377,11 +639,11 @@ function getMessageAvatar(senderType) {
 function getMessageAvatarBg(senderType) {
   const colors = {
     'USER': '#909399',
-    'AI': '#1a5fb4',
+    'AI': '#b72a33',
     'HUMAN': '#67c23a',
-    'SYSTEM': '#e6a23c'
+    'SYSTEM': '#b72a33'
   }
-  return colors[senderType] || '#1a5fb4'
+  return colors[senderType] || '#b72a33'
 }
 
 // 滚动到底部
@@ -393,10 +655,213 @@ function scrollToBottom() {
   })
 }
 
+function getSocketStatusLabel() {
+  const labels = {
+    connecting: '连接中',
+    connected: '已连接',
+    reconnecting: '重连中',
+    disconnected: '已断开',
+    error: '连接异常'
+  }
+  return labels[socketStatus.value] || '已断开'
+}
+
+function getSocketStatusTagType() {
+  const types = {
+    connecting: 'warning',
+    connected: 'success',
+    reconnecting: 'warning',
+    disconnected: 'info',
+    error: 'danger'
+  }
+  return types[socketStatus.value] || 'info'
+}
+
+function clearConversationReconnectTimer() {
+  if (conversationReconnectTimer) {
+    clearTimeout(conversationReconnectTimer)
+    conversationReconnectTimer = null
+  }
+}
+
+function disconnectConversationSocket() {
+  shouldReconnectConversation = false
+  clearConversationReconnectTimer()
+  if (conversationSocket) {
+    conversationSocket.close()
+    conversationSocket = null
+  }
+  socketStatus.value = 'disconnected'
+}
+
+function upsertRealtimeMessage(message) {
+  if (!message?.id) return
+  const index = messages.value.findIndex(item => String(item.id) === String(message.id))
+  if (index >= 0) {
+    messages.value.splice(index, 1, { ...messages.value[index], ...message })
+  } else {
+    messages.value.push(message)
+  }
+  scrollToBottom()
+}
+
+async function refreshConversationListIfNeeded() {
+  try {
+    await loadConversationHistoryList()
+  } catch (error) {
+    console.error('刷新会话列表失败:', error)
+  }
+}
+
+function scheduleConversationReconnect(targetSessionId) {
+  if (!shouldReconnectConversation || !targetSessionId) return
+
+  clearConversationReconnectTimer()
+  socketStatus.value = 'reconnecting'
+  const delay = Math.min(10000, 1000 * (2 ** Math.min(conversationReconnectAttempts, 3)))
+  conversationReconnectAttempts += 1
+  conversationReconnectTimer = window.setTimeout(() => {
+    connectConversationSocket(targetSessionId)
+  }, delay)
+}
+
+function handleRealtimeEvent(event) {
+  if (!event || event.sessionId !== sessionId.value) return
+
+  if (event.eventType === 'message') {
+    const message = event.payload || {}
+    // 当前页面已经通过 SSE 处理用户输入和 AI 回复，只同步人工客服和系统消息，避免重复。
+    if (message.senderType === 'HUMAN' || message.senderType === 'SYSTEM') {
+      upsertRealtimeMessage(message)
+      refreshConversationListIfNeeded()
+    }
+    return
+  }
+
+  if (event.eventType === 'conversation_update') {
+    refreshConversationListIfNeeded()
+  }
+}
+
+function connectConversationSocket(targetSessionId) {
+  shouldReconnectConversation = true
+  clearConversationReconnectTimer()
+  if (!targetSessionId) return
+  socketStatus.value = 'connecting'
+
+  conversationSocket = createConversationSocket(targetSessionId, {
+    onOpen: () => {
+      socketStatus.value = 'connected'
+      conversationReconnectAttempts = 0
+    },
+    onMessage: handleRealtimeEvent,
+    onClose: () => {
+      conversationSocket = null
+      if (shouldReconnectConversation && sessionId.value === targetSessionId) {
+        scheduleConversationReconnect(targetSessionId)
+        return
+      }
+      socketStatus.value = 'disconnected'
+    },
+    onError: error => {
+      socketStatus.value = 'error'
+      console.warn('会话实时连接异常:', error)
+    }
+  })
+}
+
 // 快捷发送
 function quickSend(text) {
   inputMessage.value = text
   sendMessage()
+}
+
+function getQuickServiceIcon(iconKey) {
+  return quickServiceIconMap[iconKey] || Document
+}
+
+async function loadQuickServices() {
+  const res = await getEnabledQuickServices()
+  quickActions.value = res.data || []
+}
+
+function applyQuickService(action) {
+  const promptText = action.promptText || action.label || ''
+  if (!promptText.trim()) return
+  quickSend(promptText)
+}
+
+async function loadConversationHistoryList() {
+  const res = await getMyConversations()
+  conversationHistory.value = res.data || []
+}
+
+async function startNewConversation() {
+  disconnectConversationSocket()
+  const res = await createConversation()
+  sessionId.value = res.data.sessionId
+  messages.value = []
+  await loadConversationHistoryList()
+  connectConversationSocket(sessionId.value)
+  nextTick(() => {
+    chatInputRef.value?.focus?.()
+  })
+}
+
+async function selectConversation(nextSessionId) {
+  if (!nextSessionId || nextSessionId === sessionId.value) return
+
+  disconnectConversationSocket()
+  sessionId.value = nextSessionId
+  const historyRes = await getConversationHistory(sessionId.value)
+  messages.value = formatBackendMessages(historyRes.data || [])
+  scrollToBottom()
+  connectConversationSocket(sessionId.value)
+}
+
+async function deleteSelectedConversation(targetSessionId) {
+  if (!targetSessionId) return
+
+  try {
+    await ElMessageBox.confirm('删除后将无法恢复该会话记录，确定删除吗？', '删除会话', {
+      confirmButtonText: '删除',
+      cancelButtonText: '取消',
+      type: 'warning'
+    })
+  } catch (error) {
+    return
+  }
+
+  disconnectConversationSocket()
+  try {
+    await deleteConversation(targetSessionId)
+    await loadConversationHistoryList()
+    if (targetSessionId === sessionId.value) {
+      sessionId.value = ''
+      messages.value = []
+      inputMessage.value = ''
+    }
+    ElMessage.success('会话已删除')
+  } catch (error) {
+    console.error('删除会话失败:', error)
+    ElMessage.error(error.response?.data?.message || '删除失败，请稍后重试')
+  } finally {
+    if (sessionId.value) {
+      connectConversationSocket(sessionId.value)
+    }
+    nextTick(() => {
+      chatInputRef.value?.focus?.()
+    })
+  }
+}
+
+function formatBackendMessages(history) {
+  return history.map(msg => ({
+    senderType: msg.senderType,
+    content: msg.content,
+    createdAt: msg.createdAt,
+    knowledgeSourceChunkIds: msg.knowledgeSourceChunkIds
+  }))
 }
 
 // 发送消息
@@ -404,8 +869,12 @@ async function sendMessage() {
   const message = inputMessage.value.trim()
   if (!message || isLoading.value) return
 
-  // 暂停轮询，避免冲突
-  stopMessagePolling()
+  if (!sessionId.value) {
+    const conversationRes = await createConversation()
+    sessionId.value = conversationRes.data.sessionId
+    await loadConversationHistoryList()
+    connectConversationSocket(sessionId.value)
+  }
 
   inputMessage.value = ''
   isLoading.value = true
@@ -421,27 +890,46 @@ async function sendMessage() {
   scrollToBottom()
 
   try {
-    const res = await sendMessageApi(sessionId.value, message)
-    const data = res.data
+    const streamingAiMsg = {
+      id: 'stream-' + Date.now(),
+      senderType: 'AI',
+      content: '',
+      createdAt: new Date().toISOString()
+    }
+    messages.value.push(streamingAiMsg)
+    const streamingIndex = messages.value.length - 1
+    scrollToBottom()
 
-    // 发送成功后，立即获取完整消息列表替换
+    let doneData = null
+    await streamMessageApi(sessionId.value, message, {
+      onDelta: delta => {
+        const current = messages.value[streamingIndex]
+        if (current && current.id === streamingAiMsg.id) {
+          current.content = `${current.content || ''}${delta}`
+        }
+        scrollToBottom()
+      },
+      onDone: data => {
+        doneData = data
+      },
+      onError: error => {
+        throw new Error(error?.message || '流式响应失败')
+      }
+    })
+
+    // 流式输出结束后，拉取完整消息列表，校准意图、知识来源、图片片段等后端字段
     const historyRes = await getConversationHistory(sessionId.value)
     if (historyRes.data) {
-      messages.value = historyRes.data.map(msg => ({
-        senderType: msg.senderType,
-        content: msg.content,
-        createdAt: msg.createdAt,
-        knowledgeSourceChunkIds: msg.knowledgeSourceChunkIds
-      }))
+      messages.value = formatBackendMessages(historyRes.data)
     }
+    await loadConversationHistoryList()
 
-    // 如果是AI回复且后端没返回（正常情况已经通过history获取），兜底处理
-    if (!data.needHandoff && data.content && messages.value.length === 1) {
-      messages.value.push({
-        senderType: 'AI',
-        content: data.content,
-        createdAt: new Date().toISOString()
-      })
+    // 后端极端情况下未及时返回历史时，用 done 数据兜底展示。
+    if (doneData?.content && !messages.value.some(msg => msg.senderType === 'AI' && msg.content === doneData.content)) {
+      const current = messages.value[streamingIndex]
+      if (current && current.id === streamingAiMsg.id) {
+        current.content = doneData.content
+      }
     }
   } catch (error) {
     console.error('发送消息失败:', error)
@@ -455,8 +943,6 @@ async function sendMessage() {
   } finally {
     isLoading.value = false
     scrollToBottom()
-    // 恢复轮询
-    startMessagePolling()
   }
 }
 
@@ -477,8 +963,7 @@ async function submitRating() {
     ratingComment.value = ''
 
     // 创建新会话
-    const res = await createConversation()
-    sessionId.value = res.data.sessionId
+    await startNewConversation()
 
     // 显示提示
     ElMessage.success('感谢您的评价，已为您开启新会话')
@@ -493,74 +978,39 @@ function goToAdmin() {
   router.push('/admin')
 }
 
-// 轮询获取新消息（用于接收人工客服回复）
-async function pollMessages() {
-  if (!sessionId.value) return
-  try {
-    const res = await getConversationHistory(sessionId.value)
-    const history = res.data
-    if (!history || history.length === 0) return
-
-    // 将后端消息格式化为前端格式
-    const formattedMessages = history.map(msg => ({
-      senderType: msg.senderType,
-      content: msg.content,
-      createdAt: msg.createdAt,
-      knowledgeSourceChunkIds: msg.knowledgeSourceChunkIds
-    }))
-
-    // 如果本地消息为空，直接赋值
-    if (messages.value.length === 0) {
-      messages.value = formattedMessages
-      return
-    }
-
-    // 如果远程消息更多，追加新消息
-    if (formattedMessages.length > messages.value.length) {
-      const newMessages = formattedMessages.slice(messages.value.length)
-      messages.value.push(...newMessages)
-    }
-  } catch (error) {
-    console.error('获取消息失败:', error)
-  }
-}
-
-// 启动轮询
-function startMessagePolling() {
-  if (messagePollTimer) return
-  messagePollTimer = setInterval(pollMessages, 3000) // 每3秒轮询一次
-}
-
-// 停止轮询
-function stopMessagePolling() {
-  if (messagePollTimer) {
-    clearInterval(messagePollTimer)
-    messagePollTimer = null
+function handleUserCommand(command) {
+  if (command === 'logout') {
+    clearAuth()
+    router.replace('/login')
   }
 }
 
 // 初始化
 onMounted(async () => {
+  window.addEventListener('pointermove', handleGlobalPointerMove)
+  window.addEventListener('pointerup', handleGlobalPointerUp)
+  window.addEventListener('pointercancel', handleGlobalPointerUp)
+  window.addEventListener('resize', handleWindowResize)
   try {
-    // 创建会话
-    const res = await createConversation()
-    sessionId.value = res.data.sessionId
-
-    // 加载常见问题
-    const faqRes = await getFrequentQuestions(5)
-    frequentQuestions.value = faqRes.data
-
-    // 启动消息轮询
-    startMessagePolling()
+    currentUser.value = getStoredUser()
+    await loadQuickServices()
+    await loadConversationHistoryList()
+    if (conversationHistory.value.length > 0) {
+      await selectConversation(conversationHistory.value[0].sessionId)
+    } else {
+      await startNewConversation()
+    }
   } catch (error) {
     console.error('初始化失败:', error)
   }
 })
 
-// 组件卸载时停止轮询
-import { onUnmounted } from 'vue'
 onUnmounted(() => {
-  stopMessagePolling()
+  window.removeEventListener('pointermove', handleGlobalPointerMove)
+  window.removeEventListener('pointerup', handleGlobalPointerUp)
+  window.removeEventListener('pointercancel', handleGlobalPointerUp)
+  window.removeEventListener('resize', handleWindowResize)
+  disconnectConversationSocket()
 })
 
 // 监听消息变化，自动滚动
@@ -572,7 +1022,160 @@ watch(messages, scrollToBottom, { deep: true })
   display: flex;
   flex-direction: column;
   height: 100vh;
-  background: #f5f7fa;
+  background: #eef1f5;
+
+  &.compact-mode {
+    position: fixed;
+    left: var(--widget-left, auto);
+    top: var(--widget-top, auto);
+    width: var(--widget-width, 420px);
+    height: var(--widget-height, 680px);
+    right: auto;
+    bottom: auto;
+    background: #fff;
+    border-radius: 16px;
+    overflow: hidden;
+    z-index: 1200;
+    box-shadow: 0 16px 40px rgba(22, 34, 66, 0.18);
+
+    .chat-header {
+      position: relative;
+      height: 52px;
+      padding: 0 14px 0 16px;
+
+      .header-left {
+        gap: 10px;
+        cursor: move;
+
+        .logo {
+          width: 32px;
+          height: 32px;
+        }
+
+        .brand {
+          h1 {
+            font-size: 15px;
+          }
+
+          .subtitle {
+            display: none;
+          }
+        }
+      }
+
+      .header-right {
+        gap: 8px;
+
+        .mode-toggle-btn {
+          color: #fff;
+          font-weight: 500;
+        }
+
+        .chat-user {
+          padding: 4px 6px;
+          font-size: 13px;
+        }
+      }
+
+      .widget-resize-handle {
+        position: absolute;
+        right: 3px;
+        bottom: 3px;
+        width: 18px;
+        height: 18px;
+        padding: 0;
+        border: none;
+        background: transparent;
+        cursor: nwse-resize;
+        opacity: 0.8;
+        touch-action: none;
+
+        span {
+          display: block;
+          width: 100%;
+          height: 100%;
+          background:
+            linear-gradient(135deg, transparent 0 48%, rgba(255, 255, 255, 0.95) 48% 50%, transparent 50% 100%),
+            linear-gradient(135deg, transparent 0 66%, rgba(255, 255, 255, 0.95) 66% 68%, transparent 68% 100%),
+            linear-gradient(135deg, transparent 0 84%, rgba(255, 255, 255, 0.95) 84% 86%, transparent 86% 100%);
+        }
+      }
+    }
+
+    .chat-main {
+      min-height: 0;
+    }
+
+    .chat-area {
+      min-width: 0;
+    }
+
+    .quick-service-bar {
+      min-height: 50px;
+      padding: 8px 14px;
+      gap: 12px;
+
+      .quick-service-title {
+        font-size: 13px;
+      }
+
+      .quick-service-item {
+        height: 32px;
+        padding: 0 11px;
+      }
+    }
+
+    .welcome-panel {
+      padding: 24px 18px;
+
+      .welcome-content {
+        max-width: 100%;
+
+        .welcome-title {
+          font-size: 22px;
+        }
+
+        .welcome-desc {
+          font-size: 13px;
+          margin-bottom: 20px;
+        }
+      }
+    }
+
+    .message-list {
+      padding: 16px 14px;
+    }
+
+    .message-item {
+      margin-bottom: 18px;
+    }
+
+    .input-area {
+      padding: 14px;
+
+      .input-wrapper {
+        grid-template-columns: minmax(0, 1fr) 108px;
+        gap: 10px;
+
+        .el-textarea {
+          min-height: 72px;
+
+          :deep(.el-textarea__inner) {
+            min-height: 72px !important;
+          }
+        }
+
+        .input-actions .el-button {
+          height: 36px;
+        }
+      }
+    }
+  }
+}
+
+.widget-drag-handle {
+  user-select: none;
+  touch-action: none;
 }
 
 // 头部
@@ -581,10 +1184,10 @@ watch(messages, scrollToBottom, { deep: true })
   align-items: center;
   justify-content: space-between;
   padding: 0 24px;
-  height: 64px;
-  background: #fff;
-  border-bottom: 1px solid #e4e7ed;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+  height: 58px;
+  background: #b72a33;
+  border-bottom: 1px solid #941f28;
+  box-shadow: 0 2px 8px rgba(123, 30, 38, 0.22);
 
   .header-left {
     display: flex;
@@ -595,23 +1198,59 @@ watch(messages, scrollToBottom, { deep: true })
       display: flex;
       align-items: center;
       justify-content: center;
-      width: 44px;
-      height: 44px;
-      background: #f0f5ff;
-      border-radius: 8px;
+      width: 38px;
+      height: 38px;
+      background: rgba(255, 255, 255, 0.16);
+      border-radius: 6px;
     }
 
     .brand {
       h1 {
         font-size: 18px;
         font-weight: 600;
-        color: #1a1a1a;
+        color: #fff;
         margin: 0;
       }
 
       .subtitle {
         font-size: 12px;
-        color: #909399;
+        color: rgba(255, 255, 255, 0.78);
+      }
+    }
+  }
+
+  .header-right {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+
+    .socket-status-tag {
+      border-color: rgba(255, 255, 255, 0.38);
+      background: rgba(255, 255, 255, 0.12);
+      color: #fff;
+    }
+
+    .chat-user {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      cursor: pointer;
+      color: #fff;
+      font-size: 14px;
+      padding: 6px 8px;
+      border-radius: 4px;
+
+      &:hover {
+        background: rgba(255, 255, 255, 0.12);
+      }
+    }
+
+    .mode-toggle-btn {
+      color: #fff;
+      padding: 6px 10px;
+
+      &:hover {
+        background: rgba(255, 255, 255, 0.12);
       }
     }
   }
@@ -624,13 +1263,45 @@ watch(messages, scrollToBottom, { deep: true })
   overflow: hidden;
 }
 
-// 左侧快捷入口
-.quick-actions {
+// 左侧会话工作台
+.chat-sidebar {
   width: 280px;
-  padding: 20px;
+  padding: 18px;
   background: #fff;
   border-right: 1px solid #e4e7ed;
-  overflow-y: auto;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+
+  .sidebar-user {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px;
+    border: 1px solid #e4e7ed;
+    border-radius: 8px;
+    background: #f8fafc;
+    margin-bottom: 14px;
+
+    strong {
+      display: block;
+      color: #1f2d3d;
+      font-size: 14px;
+      margin-bottom: 2px;
+    }
+
+    span {
+      color: #7a8798;
+      font-size: 12px;
+    }
+  }
+
+  .new-chat-btn {
+    width: 100%;
+    height: 40px;
+    border-radius: 6px;
+    margin-bottom: 18px;
+  }
 
   .section-title {
     font-size: 14px;
@@ -638,56 +1309,89 @@ watch(messages, scrollToBottom, { deep: true })
     color: #606266;
     margin-bottom: 12px;
     padding-left: 8px;
-    border-left: 3px solid #1a5fb4;
+    border-left: 3px solid #b72a33;
   }
 
-  .action-buttons {
+  .conversation-list {
     display: flex;
     flex-direction: column;
+    flex: 1;
     gap: 8px;
+    min-height: 0;
+    overflow-y: auto;
+    margin-bottom: 0;
+    padding-right: 2px;
 
-    .action-btn {
-      justify-content: flex-start;
-      height: 44px;
-      padding: 0 16px;
+    .conversation-item {
+      position: relative;
+      width: 100%;
+      text-align: left;
+      min-height: 62px;
+      border: 1px solid #dce5f0;
+      background: #fff;
+      padding: 11px 42px 11px 14px;
       border-radius: 8px;
-
-      .el-icon {
-        margin-right: 8px;
-      }
-    }
-  }
-
-  .faq-list {
-    .faq-item {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      padding: 10px 12px;
-      margin-bottom: 4px;
-      border-radius: 6px;
       cursor: pointer;
-      font-size: 13px;
-      color: #606266;
-      transition: all 0.2s;
+      box-shadow: 0 1px 2px rgba(16, 24, 40, 0.04);
+      transition: all 0.18s ease;
 
       &:hover {
-        background: #f5f7fa;
-        color: #1a5fb4;
+        background: #fff7f8;
+        border-color: #b8d7ff;
       }
 
-      .el-icon {
-        flex-shrink: 0;
-        color: #909399;
+      &.active {
+        background: #fbf0f1;
+        border-color: #e6a6ab;
       }
 
-      span {
+      .conversation-title {
+        display: block;
+        color: #1f2d3d;
+        font-size: 14px;
+        font-weight: 600;
+        white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
-        white-space: nowrap;
+      }
+
+      .conversation-meta {
+        display: block;
+        margin-top: 6px;
+        color: #8a94a6;
+        font-size: 12px;
+      }
+
+      .clear-conversation {
+        position: absolute;
+        top: 9px;
+        right: 9px;
+        width: 24px;
+        height: 24px;
+        border: none;
+        border-radius: 50%;
+        background: rgba(26, 95, 180, 0.1);
+        color: #b72a33;
+        cursor: pointer;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+
+        &:hover {
+          background: rgba(26, 95, 180, 0.18);
+        }
       }
     }
+
+    .empty-history {
+      color: #98a2b3;
+      font-size: 13px;
+      padding: 12px;
+      background: #f8fafc;
+      border-radius: 8px;
+    }
   }
+
 }
 
 // 聊天区域
@@ -696,6 +1400,58 @@ watch(messages, scrollToBottom, { deep: true })
   display: flex;
   flex-direction: column;
   background: #fff;
+}
+
+.quick-service-bar {
+  min-height: 58px;
+  padding: 10px 24px;
+  border-bottom: 1px solid #e4e7ed;
+  background: #fff;
+  display: flex;
+  align-items: center;
+  gap: 18px;
+
+  .quick-service-title {
+    flex-shrink: 0;
+    color: #606266;
+    font-size: 14px;
+    font-weight: 600;
+    padding-left: 8px;
+    border-left: 3px solid #b72a33;
+  }
+
+  .quick-service-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    overflow-x: auto;
+  }
+
+  .quick-service-item {
+    height: 36px;
+    padding: 0 13px;
+    border: 1px solid #d7e3f1;
+    border-radius: 6px;
+    background: #f8fbff;
+    color: #46566a;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    white-space: nowrap;
+    transition: all 0.18s ease;
+
+    .el-icon {
+      color: #b72a33;
+      font-size: 16px;
+    }
+
+    &:hover {
+      border-color: #e6a6ab;
+      background: #fbf0f1;
+      color: #b72a33;
+    }
+  }
 }
 
 // 欢迎界面
@@ -740,8 +1496,8 @@ watch(messages, scrollToBottom, { deep: true })
         font-size: 14px;
 
         &:hover {
-          color: #1a5fb4;
-          border-color: #1a5fb4;
+          color: #b72a33;
+          border-color: #b72a33;
         }
       }
     }
@@ -768,7 +1524,7 @@ watch(messages, scrollToBottom, { deep: true })
       align-items: flex-end;
 
       .message-body {
-        background: #1a5fb4;
+        background: #b72a33;
         color: #fff;
         border-radius: 12px 12px 4px 12px;
       }
@@ -792,11 +1548,36 @@ watch(messages, scrollToBottom, { deep: true })
       align-items: flex-start;
 
       .message-body {
-        background: #fdf6ec;
-        border: 1px solid #f5dab1;
-        border-radius: 12px;
-        color: #e6a23c;
-        font-size: 13px;
+        background: #fffdfd;
+        border: 1px solid #f0d8dc;
+        border-left: 4px solid #b72a33;
+        border-radius: 10px;
+        color: #324055;
+        font-size: 14px;
+        box-shadow: 0 1px 2px rgba(183, 42, 51, 0.04);
+
+        &.scope-guide-body {
+          max-width: 760px;
+          padding: 14px 18px 16px;
+
+          &::before {
+            content: '系统提示';
+            display: inline-flex;
+            align-items: center;
+            margin-bottom: 10px;
+            padding: 2px 8px;
+            border-radius: 999px;
+            background: #fff2f3;
+            color: #b72a33;
+            font-size: 12px;
+            font-weight: 600;
+            letter-spacing: 0;
+          }
+
+          :deep(p) {
+            margin: 6px 0;
+          }
+        }
       }
     }
   }
@@ -841,10 +1622,16 @@ watch(messages, scrollToBottom, { deep: true })
     }
 
     .message-body {
+      display: inline-flex;
+      flex-direction: column;
+      align-items: flex-start;
+      width: fit-content;
+      max-width: 100%;
       padding: 12px 16px;
       font-size: 14px;
       line-height: 1.6;
       color: #1a1a1a;
+      word-break: break-word;
 
       :deep(pre) {
         background: #f5f7fa;
@@ -895,6 +1682,14 @@ watch(messages, scrollToBottom, { deep: true })
       gap: 10px;
       flex-wrap: wrap;
       margin-top: 10px;
+
+      .el-button {
+        border-radius: 6px;
+      }
+
+      .el-icon {
+        margin-right: 4px;
+      }
     }
 
     .intent-label {
@@ -915,7 +1710,7 @@ watch(messages, scrollToBottom, { deep: true })
   span {
     width: 8px;
     height: 8px;
-    background: #1a5fb4;
+    background: #b72a33;
     border-radius: 50%;
     animation: typing 1.4s infinite;
     opacity: 0.4;
@@ -948,20 +1743,32 @@ watch(messages, scrollToBottom, { deep: true })
   border-top: 1px solid #e4e7ed;
 
   .input-wrapper {
-    display: flex;
-    gap: 12px;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 132px;
+    gap: 14px;
+    align-items: stretch;
 
     .el-textarea {
-      flex: 1;
+      min-height: 88px;
+
+      :deep(.el-textarea__inner) {
+        min-height: 88px !important;
+        padding: 12px 14px;
+        line-height: 1.6;
+      }
     }
 
     .input-actions {
       display: flex;
       flex-direction: column;
-      gap: 8px;
+      gap: 10px;
 
       .el-button {
-        height: 40px;
+        width: 100%;
+        height: 39px;
+        margin-left: 0;
+        border-radius: 4px;
+        justify-content: center;
       }
     }
   }

@@ -207,8 +207,8 @@ function updateTrendChart(dates, data) {
       smooth: true,
       symbol: 'circle',
       symbolSize: 8,
-      lineStyle: { color: '#1a5fb4', width: 3 },
-      itemStyle: { color: '#1a5fb4' },
+      lineStyle: { color: '#b72a33', width: 3 },
+      itemStyle: { color: '#b72a33' },
       areaStyle: {
         color: {
           type: 'linear',
@@ -265,7 +265,7 @@ function initIntentChart() {
         }
       },
       data: [
-        { value: 335, name: '政策咨询', itemStyle: { color: '#1a5fb4' } },
+        { value: 335, name: '政策咨询', itemStyle: { color: '#b72a33' } },
         { value: 310, name: '业务办理', itemStyle: { color: '#52c41a' } },
         { value: 234, name: '进度查询', itemStyle: { color: '#fa8c16' } },
         { value: 135, name: '技术支持', itemStyle: { color: '#722ed1' } },

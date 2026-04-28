@@ -4,8 +4,8 @@
     <div class="search-bar">
       <el-input
         v-model="searchQuery"
+        class="search-input"
         placeholder="搜索会话ID或用户"
-        style="width: 240px"
         clearable
       >
         <template #prefix>
@@ -13,7 +13,7 @@
         </template>
       </el-input>
 
-      <el-select v-model="statusFilter" placeholder="会话状态" clearable style="width: 140px">
+      <el-select v-model="statusFilter" class="status-select" placeholder="会话状态" clearable>
         <el-option label="进行中" value="ACTIVE" />
         <el-option label="已关闭" value="CLOSED" />
         <el-option label="已转人工" value="HANDOFF" />
@@ -25,7 +25,7 @@
         range-separator="至"
         start-placeholder="开始日期"
         end-placeholder="结束日期"
-        style="width: 260px"
+        class="date-range"
       />
 
       <el-button type="primary" @click="fetchConversations">
@@ -38,10 +38,12 @@
     <el-table
       :data="conversations"
       v-loading="loading"
+      class="conversation-table"
       stripe
-      style="width: 100%"
+      border
+      fit
     >
-      <el-table-column prop="sessionId" label="会话ID" width="180">
+      <el-table-column prop="sessionId" label="会话ID" min-width="220">
         <template #default="{ row }">
           <el-link type="primary" @click="viewDetail(row)">
             {{ row.sessionId.substring(0, 16) }}...
@@ -49,13 +51,13 @@
         </template>
       </el-table-column>
 
-      <el-table-column prop="userName" label="用户" width="120">
+      <el-table-column prop="userName" label="用户" min-width="150">
         <template #default="{ row }">
           {{ row.userName || '匿名用户' }}
         </template>
       </el-table-column>
 
-      <el-table-column prop="primaryIntent" label="主要意图" width="120">
+      <el-table-column prop="primaryIntent" label="主要意图" min-width="150">
         <template #default="{ row }">
           <el-tag v-if="row.primaryIntent" size="small" type="info">
             {{ getIntentLabel(row.primaryIntent) }}
@@ -64,7 +66,7 @@
         </template>
       </el-table-column>
 
-      <el-table-column prop="status" label="状态" width="100">
+      <el-table-column prop="status" label="状态" min-width="120">
         <template #default="{ row }">
           <el-tag :type="getStatusType(row.status)" size="small">
             {{ getStatusLabel(row.status) }}
@@ -72,14 +74,14 @@
         </template>
       </el-table-column>
 
-      <el-table-column prop="humanHandoff" label="转人工" width="80">
+      <el-table-column prop="humanHandoff" label="转人工" min-width="100">
         <template #default="{ row }">
           <el-tag v-if="row.humanHandoff" type="warning" size="small">是</el-tag>
           <span v-else>-</span>
         </template>
       </el-table-column>
 
-      <el-table-column prop="satisfactionScore" label="满意度" width="100">
+      <el-table-column prop="satisfactionScore" label="满意度" min-width="130">
         <template #default="{ row }">
           <el-rate
             v-if="row.satisfactionScore"
@@ -92,13 +94,13 @@
         </template>
       </el-table-column>
 
-      <el-table-column prop="createdAt" label="创建时间" width="160">
+      <el-table-column prop="createdAt" label="创建时间" min-width="180">
         <template #default="{ row }">
           {{ formatDateTime(row.createdAt) }}
         </template>
       </el-table-column>
 
-      <el-table-column label="操作" width="120" fixed="right">
+      <el-table-column label="操作" min-width="120">
         <template #default="{ row }">
           <el-button type="primary" link @click="viewDetail(row)">
             查看
@@ -300,12 +302,30 @@ onMounted(() => {
 <style scoped lang="scss">
 .conversations {
   .search-bar {
-    display: flex;
+    display: grid;
+    grid-template-columns: minmax(220px, 1.2fr) minmax(150px, 0.7fr) minmax(420px, 2.4fr) 96px;
     gap: 12px;
+    align-items: center;
     margin-bottom: 20px;
     padding: 20px;
     background: #fff;
     border-radius: 8px;
+
+    .search-input,
+    .status-select,
+    .date-range {
+      width: 100%;
+    }
+  }
+
+  .conversation-table {
+    width: 100%;
+  }
+
+  .conversation-table :deep(.el-table__header),
+  .conversation-table :deep(.el-table__body),
+  .conversation-table :deep(.el-table__empty-block) {
+    width: 100% !important;
   }
 
   .pagination {

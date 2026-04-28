@@ -4,6 +4,9 @@
     <div class="page-header">
       <h2>人工接入</h2>
       <div class="header-actions">
+        <el-tag :type="getSocketStatusType()" effect="plain" class="socket-status-tag">
+          实时连接 · {{ getSocketStatusLabel() }}
+        </el-tag>
         <el-tag type="success" effect="dark" size="large">
           <el-icon><User /></el-icon>
           在线客服: {{ onlineAgents }}人
@@ -29,30 +32,30 @@
           </el-button>
         </div>
       </template>
-      <el-table :data="pendingList" v-loading="loading" stripe border>
-        <el-table-column prop="sessionId" label="会话ID" width="180" show-overflow-tooltip />
-        <el-table-column prop="userName" label="用户" width="120" />
-        <el-table-column prop="intentType" label="意图类型" width="120">
+      <el-table class="handoff-table" :data="pendingList" v-loading="loading" stripe border fit>
+        <el-table-column prop="sessionId" label="会话ID" min-width="180" show-overflow-tooltip />
+        <el-table-column prop="userName" label="用户" min-width="120" />
+        <el-table-column prop="intentType" label="意图类型" min-width="130">
           <template #default="{ row }">
             <el-tag size="small" effect="light" :type="getIntentTagType(row.intentType)">
               {{ getIntentLabel(row.intentType) }}
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="handoffTime" label="转人工时间" width="160">
+        <el-table-column prop="handoffTime" label="转人工时间" min-width="170">
           <template #default="{ row }">
             {{ formatTime(row.handoffTime) }}
           </template>
         </el-table-column>
-        <el-table-column prop="waitTime" label="等待时长" width="100">
+        <el-table-column prop="waitTime" label="等待时长" min-width="110">
           <template #default="{ row }">
             <el-tag :type="getWaitTimeTagType(row.waitTime)" size="small">
               {{ formatDuration(row.waitTime) }}
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="lastMessage" label="最后消息" min-width="200" show-overflow-tooltip />
-        <el-table-column label="操作" width="180" fixed="right">
+        <el-table-column prop="lastMessage" label="最后消息" min-width="320" show-overflow-tooltip />
+        <el-table-column label="操作" min-width="180">
           <template #default="{ row }">
             <el-button type="primary" size="small" @click="handleAccept(row)">
               <el-icon><Check /></el-icon>
@@ -82,26 +85,26 @@
           </el-button>
         </div>
       </template>
-      <el-table :data="mySessionList" v-loading="loadingMy" stripe border>
-        <el-table-column prop="sessionId" label="会话ID" width="180" show-overflow-tooltip />
-        <el-table-column prop="userName" label="用户" width="120" />
-        <el-table-column prop="acceptTime" label="接入时间" width="160">
+      <el-table class="handoff-table" :data="mySessionList" v-loading="loadingMy" stripe border fit>
+        <el-table-column prop="sessionId" label="会话ID" min-width="220" show-overflow-tooltip />
+        <el-table-column prop="userName" label="用户" min-width="150" />
+        <el-table-column prop="acceptTime" label="接入时间" min-width="180">
           <template #default="{ row }">
             {{ formatTime(row.acceptTime) }}
           </template>
         </el-table-column>
-        <el-table-column prop="duration" label="会话时长" width="100">
+        <el-table-column prop="duration" label="会话时长" min-width="130">
           <template #default="{ row }">
             {{ formatDuration(row.duration) }}
           </template>
         </el-table-column>
-        <el-table-column prop="unreadCount" label="未读消息" width="90" align="center">
+        <el-table-column prop="unreadCount" label="未读消息" min-width="120" align="center">
           <template #default="{ row }">
             <el-badge :value="row.unreadCount" :max="99" v-if="row.unreadCount > 0" />
             <span v-else class="text-muted">0</span>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="200" fixed="right">
+        <el-table-column label="操作" min-width="220">
           <template #default="{ row }">
             <el-button type="primary" size="small" @click="handleReply(row)">
               <el-icon><ChatLineRound /></el-icon>
@@ -124,7 +127,7 @@
       width="700px"
       :close-on-click-modal="false"
       class="chat-dialog"
-      @closed="stopChatPolling"
+      @closed="disconnectChatSocket"
     >
       <div class="chat-container">
         <div class="chat-header-info">
@@ -138,7 +141,7 @@
           <div
             v-for="msg in currentChatHistory"
             :key="msg.id"
-            :class="['message-wrapper', msg.senderType === 'USER' ? 'user' : 'other']"
+            :class="['message-wrapper', isRightSideMessage(msg.senderType) ? 'right-side' : 'left-side']"
           >
             <div class="message-avatar">
               <el-avatar
@@ -185,6 +188,17 @@ import {
   ChatDotRound, ChatLineRound, CircleCheck,
   UserFilled, Service, Promotion
 } from '@element-plus/icons-vue'
+import {
+  acceptConversation,
+  closeAdminConversation,
+  completeConversation,
+  getConversationMessages,
+  getHandoffConversations,
+  getHandoffSummary,
+  getMySessions,
+  replyConversation,
+  createConversationSocket
+} from '@/api/chat.js'
 
 const loading = ref(false)
 const loadingMy = ref(false)
@@ -198,12 +212,13 @@ const sending = ref(false)
 const currentChatHistory = ref([])
 const currentSession = ref(null)
 const chatHistoryRef = ref(null)
+const socketStatus = ref('disconnected')
 
 let refreshTimer = null
-let chatPollTimer = null
-
-// 当前是否在对话框中
-const isInChatDialog = ref(false)
+let chatSocket = null
+let chatReconnectTimer = null
+let chatReconnectAttempts = 0
+let shouldReconnectChat = false
 
 const intentTypeMap = {
   'POLICY_CONSULTATION': { label: '政策咨询', type: '' },
@@ -227,7 +242,7 @@ const getWaitTimeTagType = (seconds) => {
 const getAvatarBg = (senderType) => {
   const colors = {
     'USER': '#909399',
-    'AI': '#1a5fb4',
+    'AI': '#b72a33',
     'HUMAN': '#67c23a',
     'SYSTEM': '#e6a23c'
   }
@@ -242,6 +257,10 @@ const getSenderName = (senderType) => {
     'SYSTEM': '系统'
   }
   return names[senderType] || senderType
+}
+
+const isRightSideMessage = (senderType) => {
+  return senderType === 'USER' || senderType === 'SYSTEM' || senderType === 'AI'
 }
 
 const formatTime = (time) => {
@@ -266,42 +285,48 @@ const formatDuration = (seconds) => {
   return `${secs}秒`
 }
 
+const getSocketStatusLabel = () => {
+  const labels = {
+    connecting: '连接中',
+    connected: '已连接',
+    reconnecting: '重连中',
+    disconnected: '已断开',
+    error: '连接异常'
+  }
+  return labels[socketStatus.value] || '已断开'
+}
+
+const getSocketStatusType = () => {
+  const types = {
+    connecting: 'warning',
+    connected: 'success',
+    reconnecting: 'warning',
+    disconnected: 'info',
+    error: 'danger'
+  }
+  return types[socketStatus.value] || 'info'
+}
+
 // API 调用
 const fetchPendingList = async () => {
   loading.value = true
   try {
-    const res = await fetch('/api/admin/handoff-conversations')
-    if (!res.ok) throw new Error('获取待接入列表失败')
-    const data = await res.json()
-    pendingList.value = data.map(item => ({
+    const [listRes, summaryRes] = await Promise.all([
+      getHandoffConversations(),
+      getHandoffSummary()
+    ])
+    pendingList.value = listRes.data.map(item => ({
       ...item,
-      waitTime: Math.floor((Date.now() - new Date(item.handoffTime).getTime()) / 1000)
+      waitTime: item.waitTime ?? Math.floor((Date.now() - new Date(item.handoffTime).getTime()) / 1000)
     }))
-    pendingCount.value = pendingList.value.length
+    pendingCount.value = summaryRes.data.pendingCount
+    onlineAgents.value = summaryRes.data.onlineAgents
   } catch (error) {
     console.error('获取待接入列表失败:', error)
-    // Mock 数据
-    pendingList.value = [
-      {
-        id: 1,
-        sessionId: 'SESSION_001',
-        userName: '张三',
-        intentType: 'COMPLAINT_SUGGESTION',
-        handoffTime: new Date(Date.now() - 120000).toISOString(),
-        waitTime: 120,
-        lastMessage: '我对你们的服务非常不满意，我要投诉！'
-      },
-      {
-        id: 2,
-        sessionId: 'SESSION_002',
-        userName: '李四',
-        intentType: 'ACCOUNT_PERMISSION',
-        handoffTime: new Date(Date.now() - 300000).toISOString(),
-        waitTime: 300,
-        lastMessage: '我的账号无法登录，提示权限不足'
-      }
-    ]
-    pendingCount.value = pendingList.value.length
+    pendingList.value = []
+    pendingCount.value = 0
+    onlineAgents.value = 0
+    ElMessage.error('获取待接入列表失败')
   } finally {
     loading.value = false
   }
@@ -310,26 +335,15 @@ const fetchPendingList = async () => {
 const fetchMySessionList = async () => {
   loadingMy.value = true
   try {
-    const res = await fetch('/api/admin/my-sessions')
-    if (!res.ok) throw new Error('获取我的会话失败')
-    const data = await res.json()
-    mySessionList.value = data.map(item => ({
+    const res = await getMySessions()
+    mySessionList.value = res.data.map(item => ({
       ...item,
-      duration: Math.floor((Date.now() - new Date(item.acceptTime).getTime()) / 1000)
+      duration: item.duration ?? Math.floor((Date.now() - new Date(item.acceptTime).getTime()) / 1000)
     }))
   } catch (error) {
     console.error('获取我的会话失败:', error)
-    // Mock 数据
-    mySessionList.value = [
-      {
-        id: 3,
-        sessionId: 'SESSION_003',
-        userName: '王五',
-        acceptTime: new Date(Date.now() - 600000).toISOString(),
-        duration: 600,
-        unreadCount: 2
-      }
-    ]
+    mySessionList.value = []
+    ElMessage.error('获取我的接入会话失败')
   } finally {
     loadingMy.value = false
   }
@@ -345,10 +359,7 @@ const refreshMySessions = () => {
 
 const handleAccept = async (row) => {
   try {
-    const res = await fetch(`/api/admin/conversations/${row.sessionId}/accept`, {
-      method: 'POST'
-    })
-    if (!res.ok) throw new Error('接入失败')
+    await acceptConversation(row.sessionId)
     ElMessage.success('已接入会话')
     fetchPendingList()
     fetchMySessionList()
@@ -365,10 +376,7 @@ const handleClose = (row) => {
     type: 'warning'
   }).then(async () => {
     try {
-      const res = await fetch(`/api/admin/conversations/${row.sessionId}/close`, {
-        method: 'POST'
-      })
-      if (!res.ok) throw new Error('关闭失败')
+      await closeAdminConversation(row.sessionId)
       ElMessage.success('会话已关闭')
       fetchPendingList()
     } catch (error) {
@@ -382,9 +390,8 @@ const handleClose = (row) => {
 const loadChatHistory = async () => {
   if (!currentSession.value) return
   try {
-    const res = await fetch(`/api/admin/conversations/${currentSession.value.sessionId}/messages`)
-    if (!res.ok) throw new Error('获取聊天记录失败')
-    const messages = await res.json()
+    const res = await getConversationMessages(currentSession.value.sessionId)
+    const messages = res.data
     // 只有当消息数量变化时才更新，避免闪烁
     if (messages.length !== currentChatHistory.value.length) {
       currentChatHistory.value = messages
@@ -397,26 +404,101 @@ const loadChatHistory = async () => {
   }
 }
 
-// 启动聊天轮询
-const startChatPolling = () => {
-  if (chatPollTimer) return
-  chatPollTimer = setInterval(loadChatHistory, 2000) // 每2秒刷新一次
+const clearChatReconnectTimer = () => {
+  if (chatReconnectTimer) {
+    clearTimeout(chatReconnectTimer)
+    chatReconnectTimer = null
+  }
 }
 
-// 停止聊天轮询
-const stopChatPolling = () => {
-  if (chatPollTimer) {
-    clearInterval(chatPollTimer)
-    chatPollTimer = null
+const disconnectChatSocket = () => {
+  shouldReconnectChat = false
+  clearChatReconnectTimer()
+  if (chatSocket) {
+    chatSocket.close()
+    chatSocket = null
   }
+  socketStatus.value = 'disconnected'
+}
+
+const upsertChatMessage = (message) => {
+  if (!message?.id) return
+  const index = currentChatHistory.value.findIndex(item => String(item.id) === String(message.id))
+  if (index >= 0) {
+    currentChatHistory.value.splice(index, 1, { ...currentChatHistory.value[index], ...message })
+  } else {
+    currentChatHistory.value.push(message)
+  }
+  nextTick(() => {
+    scrollToBottom()
+  })
+}
+
+const handleRealtimeEvent = (event) => {
+  if (!event || event.sessionId !== currentSession.value?.sessionId) return
+
+  if (event.eventType === 'message') {
+    const message = event.payload || {}
+    if (message.senderType === 'USER' || message.senderType === 'HUMAN' || message.senderType === 'SYSTEM') {
+      upsertChatMessage(message)
+      fetchMySessionList()
+      if (message.senderType === 'USER') {
+        fetchPendingList()
+      }
+    }
+    return
+  }
+
+  if (event.eventType === 'conversation_update') {
+    fetchPendingList()
+    fetchMySessionList()
+  }
+}
+
+const scheduleChatReconnect = (sessionId) => {
+  if (!shouldReconnectChat || !sessionId) return
+
+  clearChatReconnectTimer()
+  socketStatus.value = 'reconnecting'
+  const delay = Math.min(10000, 1000 * (2 ** Math.min(chatReconnectAttempts, 3)))
+  chatReconnectAttempts += 1
+  chatReconnectTimer = window.setTimeout(() => {
+    connectChatSocket(sessionId)
+  }, delay)
+}
+
+const connectChatSocket = (sessionId) => {
+  shouldReconnectChat = true
+  clearChatReconnectTimer()
+  if (!sessionId) return
+  socketStatus.value = 'connecting'
+
+  chatSocket = createConversationSocket(sessionId, {
+    onOpen: () => {
+      socketStatus.value = 'connected'
+      chatReconnectAttempts = 0
+    },
+    onMessage: handleRealtimeEvent,
+    onClose: () => {
+      chatSocket = null
+      if (shouldReconnectChat && currentSession.value?.sessionId === sessionId) {
+        scheduleChatReconnect(sessionId)
+        return
+      }
+      socketStatus.value = 'disconnected'
+    },
+    onError: error => {
+      socketStatus.value = 'error'
+      console.warn('人工会话实时连接异常:', error)
+    }
+  })
 }
 
 const handleReply = async (row) => {
   currentSession.value = row
   await loadChatHistory()
   showReplyDialog.value = true
-  isInChatDialog.value = true
-  startChatPolling()
+  connectChatSocket(row.sessionId)
 }
 
 const sendReply = async () => {
@@ -426,18 +508,8 @@ const sendReply = async () => {
   }
   sending.value = true
   try {
-    const res = await fetch(`/api/admin/conversations/${currentSession.value.sessionId}/reply`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ content: replyMessage.value })
-    })
-    if (!res.ok) throw new Error('发送失败')
-    currentChatHistory.value.push({
-      id: Date.now(),
-      senderType: 'HUMAN',
-      content: replyMessage.value,
-      createdAt: new Date().toISOString()
-    })
+    const res = await replyConversation(currentSession.value.sessionId, replyMessage.value)
+    upsertChatMessage(res.data)
     replyMessage.value = ''
     ElMessage.success('发送成功')
     nextTick(() => {
@@ -464,10 +536,7 @@ const handleComplete = (row) => {
     type: 'warning'
   }).then(async () => {
     try {
-      const res = await fetch(`/api/admin/conversations/${row.sessionId}/complete`, {
-        method: 'POST'
-      })
-      if (!res.ok) throw new Error('操作失败')
+      await completeConversation(row.sessionId)
       ElMessage.success('会话已完成')
       fetchMySessionList()
     } catch (error) {
@@ -491,6 +560,7 @@ onUnmounted(() => {
   if (refreshTimer) {
     clearInterval(refreshTimer)
   }
+  disconnectChatSocket()
 })
 </script>
 
@@ -519,6 +589,12 @@ onUnmounted(() => {
 .header-actions {
   display: flex;
   gap: 12px;
+  align-items: center;
+}
+
+.socket-status-tag {
+  border-color: rgba(183, 42, 51, 0.28);
+  color: #b72a33;
 }
 
 .header-actions .el-tag {
@@ -538,6 +614,16 @@ onUnmounted(() => {
   margin-bottom: 24px;
 }
 
+.handoff-table {
+  width: 100%;
+}
+
+.handoff-table :deep(.el-table__header),
+.handoff-table :deep(.el-table__body),
+.handoff-table :deep(.el-table__empty-block) {
+  width: 100% !important;
+}
+
 .card-header {
   display: flex;
   justify-content: space-between;
@@ -554,7 +640,7 @@ onUnmounted(() => {
 }
 
 .card-title .el-icon {
-  color: #1a5fb4;
+  color: #b72a33;
   font-size: 18px;
 }
 
@@ -597,7 +683,7 @@ onUnmounted(() => {
   gap: 12px;
 }
 
-.message-wrapper.user {
+.message-wrapper.right-side {
   flex-direction: row-reverse;
 }
 
@@ -611,7 +697,7 @@ onUnmounted(() => {
   max-width: 70%;
 }
 
-.message-wrapper.user .message-content-wrapper {
+.message-wrapper.right-side .message-content-wrapper {
   align-items: flex-end;
 }
 
@@ -629,7 +715,7 @@ onUnmounted(() => {
 }
 
 .message-bubble.user {
-  background: #409EFF;
+  background: #b72a33;
   color: white;
   border-bottom-right-radius: 4px;
 }
